@@ -6,6 +6,12 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
+library(feather)
+library(arrow)
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+Lectura de los datos
+```{r setup, include=FALSE}
+df <- arrow::read_feather("datos_opt.feather")
+```
