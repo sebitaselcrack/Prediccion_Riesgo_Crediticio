@@ -17,8 +17,8 @@ knitr::opts_chunk$set(echo = TRUE)
 
 Lectura de los datos
 ```{r setup, include=FALSE}
-df <- arrow::read_feather("datos_opt.feather")
-df <- subset(df, select = c(-tot_coll_amt, -tot_cur_bal, -total_rev_hi_lim))
+#df <- arrow::read_feather("datos_opt.feather")
+#df <- subset(df, select = c(-tot_coll_amt, -tot_cur_bal, -total_rev_hi_lim))
 
 df2 = arrow::read_feather("datos_juntos.feather")
 df2 <- subset(df2, select = c(-tot_coll_amt, -tot_cur_bal, -total_rev_hi_lim))
@@ -33,12 +33,18 @@ datos1 <- sample(2, nrow(df2),
                    prob = c(0.75, 0.25))
 train <- df2[datos1 == 1,]
 test <- df2[datos1 == 2,]
+
+train$incumpla[train$incumpla == TRUE] <- 1
+train$incumpla[train$incumpla == FALSE] <- 0
+
+test$incumpla[test$incumpla == TRUE] <- 1
+test$incumpla[test$incumpla == FALSE] <- 0
 ```
 
 Selección de variables
 ```{r setup, include=FALSE}
 # Calculate information values: 
-info_values <- iv(df2, y = "incumpla", positive = "incumpla|FALSE")
+info_values <- iv(train, y = "incumpla", positive = "incumpla|0")
 ```
 
 ```{r setup, include=FALSE}
@@ -56,8 +62,6 @@ info_values %>%
   theme(plot.margin = unit(c(1, 1, 1, 1), "cm"))
 ```
 
-
-
 ```{r setup, include=FALSE}
 variables_selected_iv <- info_values %>% 
   filter(info_value >= 0.02) %>% 
@@ -65,10 +69,12 @@ variables_selected_iv <- info_values %>%
 
 df_train_iv <- train %>% select(variables_selected_iv, "incumpla")
 
-bins_var <- woebin(df_train_iv, y = "incumpla", no_cores = 4, positive = "incumpla|FALSE")
+bins_var <- woebin(df_train_iv, y = "incumpla", positive = "incumpla|0")
 
 df_train_woe2 <- woebin_ply(df_train_iv, bins_var)
+```
 
+```{r setup, include=FALSE}
 model <- glm(incumpla ~ ., data = df_train_woe2)
 summary(model)
 ```
@@ -80,18 +86,33 @@ df_test_woe2 <- woebin_ply(df_test_iv, bins_var)
 
 test_pred2 <- predict(model, df_test_woe2, type = "response")
 
-df_test_iv$incumpla[df_test_iv$incumpla == TRUE] <- 1
-df_test_iv$incumpla[df_test_iv$incumpla == FALSE] <- 0
-
 perf_eva(pred = test_pred2, label = df_test_iv$incumpla,
          type = c("roc"), 
          title = "Test Data")
 ```
 Scorecard
 ```{r, echo=FALSE}
-my_card <- scorecard(bins_var, model, points0 = 600, odds0 = 1/19, pdo = 50)
+my_card <- scorecard(bins_var, model)
 score1 = scorecard_ply(train, my_card)
 ```
-10.93% inclumpla = TRUE
 
+```{r, echo=FALSE}
+library(stringr)
+```
+
+```{r, echo=FALSE}
+do.call("bind_rows", my_card) %>% 
+  slice(-1) %>% 
+  select(-breaks, -is_special_values, -count, -count_distr, -neg, -pos, -posprob) %>% 
+  mutate_if(is.numeric, function(x) {round(x, 3)}) %>% 
+  mutate(bin = bin %>% 
+           str_replace_all("\\[", "From ") %>% 
+           str_replace_all("\\,", " to ") %>% 
+           str_replace_all("\\)", "")) -> iv_for_predictors_point
+```
+
+```{r, echo=FALSE}
+iv_for_predictors_point %>% 
+  knitr::kable(col.names = c("Predictor", "Group", "WOE", "Scorecard", "Bin IV", "Total IV"))
+```
 
