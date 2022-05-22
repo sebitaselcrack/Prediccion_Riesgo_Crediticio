@@ -12,19 +12,114 @@ library(arrow)
 library(scorecard)
 library(dplyr)    # alternatively, this also loads %>%
 library(ggplot2)
+library(klaR)
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-Lectura de los datos
-```{r setup, include=FALSE}
-#df <- arrow::read_feather("datos_opt.feather")
-#df <- subset(df, select = c(-tot_coll_amt, -tot_cur_bal, -total_rev_hi_lim))
+## Lectura de los datos
 
-df2 = arrow::read_feather("datos_juntos.feather")
-df2 <- subset(df2, select = c(-tot_coll_amt, -tot_cur_bal, -total_rev_hi_lim))
+```{r setup, include=FALSE}
+
+df = arrow::read_feather("datos_juntos.feather")
+
+# Delete cols with more than 50% with NAs
+df <- subset(df, select = c(-tot_coll_amt, -tot_cur_bal, -total_rev_hi_lim))
+
+# Solo tienen valores en 0
+df <- subset(df, select = c(-collections_12_mths_ex_med, -acc_now_delinq, 
+                            -pymnt_plan, -term))
+
+# Valores lógicos se convierten a enteros
+df$incumpla <- as.integer(df$incumpla == TRUE)
 ```
 
-Conjunto de prueba y entrenamiento
+## Separación de datos númericos y categóricos
+```{r}
+df_num <- subset(df, select = c(-sub_grade, -home_ownership,
+                                          -verification_status, -purpose, -addr_state,
+                                          -initial_list_status))
+```
+
+## Agrupar variables númericas en el dataframe
+
+```{r, include=FALSE}
+# Ver los tipos de datos del df
+sapply(df_num, class)
+
+bins <- woebin(df_num, y = "incumpla", method = "tree")
+
+options(digits = 3)
+
+# Muestra los bins de la variable X: bins$X
+bins$loan_amnt[, c(2, 4, 5, 6, 7, 8)]
+
+# Visualización de los bins de la variable X
+woebin_plot(bins, x = "loan_amnt", line_value = "woe")
+```
+
+## Aplicar la agrupación para los datos nuevos
+
+```{r, include=FALSE}
+df <- woebin_ply(df, bins, to = "bin")
+```
+
+## Convertir de datos
+```{r}
+# Convertir datos númericos a factores
+df <- mutate_if(df, sapply(df, is.character), as.factor)
+
+# Convertir datos categóricos a factores
+df <- mutate_if(df, sapply(df, is.integer), as.factor)
+
+df <- mutate_if(df, sapply(df, is.logical), as.factor)
+```
+
+## División de los datos
+```{r, include=FALSE}
+tv <- split_df(df, y = "incumpla", ratio = c(0.75, 0.25),
+               seed = 42, no_dfs = 2, name_dfs = c("train", "valid"))
+
+train <- tv$train
+valid <- tv$valid
+
+```
+
+## Análisis de WOEs
+
+```{r, include=FALSE}
+
+
+woe_model <- woe(as.factor(train$incumpla) ~ ., data = train)
+woe_model$xnew
+
+train_woes <- data.frame(incumpla = train$incumpla, 
+                         woe_model$xnew)
+
+valid_woes <- predict(woe_model, subset(valid, select = c(-incumpla)))
+valid_woes
+# model <- glm(incumpla ~ ., data = train_woes, family = binomial)
+summary(model)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## ANTES
+
+
+
+
+## Conjunto de prueba y entrenamiento
 ```{r setup, include=FALSE}
 set.seed(27042022) # se fija por reproducibilidad
 
@@ -41,7 +136,7 @@ test$incumpla[test$incumpla == TRUE] <- 1
 test$incumpla[test$incumpla == FALSE] <- 0
 ```
 
-Selección de variables
+# Selección de variables
 ```{r setup, include=FALSE}
 # Calculate information values: 
 info_values <- iv(train, y = "incumpla", positive = "incumpla|0")
@@ -74,12 +169,12 @@ bins_var <- woebin(df_train_iv, y = "incumpla", positive = "incumpla|0")
 df_train_woe2 <- woebin_ply(df_train_iv, bins_var)
 ```
 
-```{r setup, include=FALSE}
+```{r, include=FALSE}
 model <- glm(incumpla ~ ., data = df_train_woe2)
 summary(model)
 ```
 
-```{r}
+```{r, include=FALSE}
 # Convert to binned data frame for test data: 
 df_test_iv <- test %>% select(names(df_train_iv))
 df_test_woe2 <- woebin_ply(df_test_iv, bins_var)
